@@ -16,11 +16,15 @@
 """
 import asyncio
 import os
+import sys
 import tempfile
 
 os.environ["DRY_RUN"] = "1"
 os.environ["DB_PATH"] = os.path.join(tempfile.gettempdir(), "simulate.db")
 os.environ["COOLDOWN_SECONDS"] = "0"  # 模拟器关冷却,便于观察触发
+
+# 允许从任意目录直接运行,无需设置 PYTHONPATH
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config  # noqa: E402
 from db import DB  # noqa: E402
