@@ -157,6 +157,13 @@ PYTHONPATH=. .venv\Scripts\python tests\test_engine.py
 # PYTHONPATH=. .venv/bin/python tests/test_engine.py
 ```
 
+**交互式模拟器**(无需 BOT_TOKEN,用真实数据源模拟用户会话,即时体验):
+
+```bash
+PYTHONPATH=. .venv\Scripts\python tests\simulate.py
+# 例:price BTC gt 50000 → fire → 即可看到"即将推送"的告警消息
+```
+
 ## 使用指南
 
 在 Telegram 中与机器人对话:
