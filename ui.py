@@ -14,6 +14,7 @@ def _category_menu() -> InlineKeyboardMarkup:
     kb = [
         [InlineKeyboardButton("🪙 加密货币价格提醒", callback_data="cat:price")],
         [InlineKeyboardButton("🐋 巨鲸转账提醒", callback_data="cat:whale")],
+        [InlineKeyboardButton("📰 RSS 订阅", callback_data="cat:rss")],
     ]
     return InlineKeyboardMarkup(kb)
 
@@ -41,6 +42,11 @@ def _sub_desc(s: dict) -> str:
     """订阅的一行描述,供列表/删除按钮展示。"""
     if s["category"] == "whale":
         return f"🐋 {_asset_display(s['asset'])} ≥ ${s['threshold']:,.0f}"
+    if s["category"] == "rss":
+        url = s["asset"]
+        short = url if len(url) <= 32 else url[:29] + "…"
+        kw = f" · {s['filter']}" if s.get("filter") else ""
+        return f"📰 {short}{kw}"
     op_cn = "高于" if s["op"] == "gt" else "低于"
     return f"🪙 {s['asset']} {op_cn} ${s['threshold']:,.2f}"
 
@@ -89,6 +95,10 @@ class UI:
                     "🐋 选择要监控的范围(全部币种或指定币种):",
                     reply_markup=_asset_kb(WHALE_ASSETS),
                 )
+            elif ud["category"] == "rss":
+                await query.edit_message_text(
+                    "📰 请发送一个 RSS/Atom 链接\n(例如 https://rsshub.app/bbc/subscription )"
+                )
             else:
                 await query.edit_message_text("选择要监控的币种:", reply_markup=_asset_kb(SUPPORTED_ASSETS))
 
@@ -112,16 +122,43 @@ class UI:
             ok = self.db.delete_subscription(sub_id, query.from_user.id)
             await query.edit_message_text("已删除 ✅" if ok else "删除失败或已不存在")
 
-    # ---------- 文本输入(阈值) ----------
+    # ---------- 文本输入(URL / 关键词 / 阈值) ----------
     async def on_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         ud = context.user_data
-        if "category" not in ud or "asset" not in ud:
+        if "category" not in ud:
             return  # 不在输入流程中,忽略
         cat = ud["category"]
+        raw = update.message.text.strip()
+
+        # --- RSS:两步输入(URL → 关键词) ---
+        if cat == "rss":
+            if "asset" not in ud:
+                if not (raw.startswith("http://") or raw.startswith("https://")):
+                    await update.message.reply_text("请输入以 http:// 或 https:// 开头的 RSS 链接")
+                    return
+                ud["asset"] = raw
+                await update.message.reply_text("可选:输入关键词过滤(逗号分隔,如 'ai, 比特币');发送 /skip 跳过")
+                return
+            kw = "" if raw in ("/skip", "/跳过") else raw
+            sub_id = self.db.add_subscription(
+                update.effective_user.id, "rss", ud["asset"], "contains", 0.0, filter=kw
+            )
+            url = ud["asset"]
+            short = url if len(url) <= 40 else url[:37] + "…"
+            ud.clear()
+            await update.message.reply_text(
+                f"✅ 已添加 RSS 订阅\n{short}\n关键词: {kw or '(全部)'}\n(订阅 #{sub_id})",
+                reply_markup=_category_menu(),
+            )
+            return
+
+        # --- price / whale:阈值输入 ---
+        if "asset" not in ud:
+            return
         if cat == "price" and "op" not in ud:
             return
         try:
-            threshold = float(update.message.text.replace(",", "").replace("$", ""))
+            threshold = float(raw.replace(",", "").replace("$", ""))
         except ValueError:
             await update.message.reply_text("请输入数字,例如 65000")
             return
@@ -132,8 +169,8 @@ class UI:
         ud.clear()
 
         if cat == "whale":
-            text = f"✅ 已添加提醒\n🐋 巨鲸转账 {_asset_display(asset)} ≥ ${threshold:,.0f}\n(订阅 #{sub_id})"
+            msg = f"✅ 已添加提醒\n🐋 巨鲸转账 {_asset_display(asset)} ≥ ${threshold:,.0f}\n(订阅 #{sub_id})"
         else:
             op_cn = "高于" if op == "gt" else "低于"
-            text = f"✅ 已添加提醒\n{asset} {op_cn} ${threshold:,.2f}\n(订阅 #{sub_id})"
-        await update.message.reply_text(text, reply_markup=_category_menu())
+            msg = f"✅ 已添加提醒\n{asset} {op_cn} ${threshold:,.2f}\n(订阅 #{sub_id})"
+        await update.message.reply_text(msg, reply_markup=_category_menu())

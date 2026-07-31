@@ -45,6 +45,7 @@ Crypto Alert Bot 是一个自托管的 Telegram 机器人,用于监控加密货�
 
 - 🪙 **多币种价格提醒**:BTC / ETH / SOL / BNB / DOGE / XRP / ADA / LTC(可在 `ui.py` 中扩展)
 - 🐋 **巨鲸转账监控**:≥ $100 万大额链上转账提醒(WhaleAlert,配置 `WHALEALERT_API_KEY` 后启用),支持全部币种或指定币种
+- 📰 **RSS 订阅**:粘贴任意 RSS/Atom 链接(兼容 RSSHub / GitHub / arXiv 等),可选关键词过滤,新内容自动推送
 - 📈📉 **双向阈值**:价格「高于」或「低于」设定值时触发
 - 🚦 **穿越检测 + 冷却**:仅在「未满足 → 满足」的穿越瞬间触发一次,冷却期内不重复轰炸,价格回落撤销条件后重新上膛
 - 📋 **订阅管理**:内联键盘添加 / 查看 / 删除提醒,无感交互
@@ -85,7 +86,8 @@ crypto-alert-bot/
 ├── sources/
 │   ├── base.py             # Source 抽象接口:fetch() -> list[AlertItem]
 │   ├── price_gateio.py     # Gate.io 现货行情适配器(无需 key)
-│   └── whale_alert.py      # WhaleAlert 巨鲸转账适配器(需 key,无 key 时优雅降级)
+│   ├── whale_alert.py      # WhaleAlert 巨鲸转账适配器(需 key,无 key 时优雅降级)
+│   └── rss_feed.py         # 通用 RSS/Atom 订阅适配器(feedparser,首轮基线+增量)
 ├── tests/
 │   ├── seed_test.py        # 造测试数据(供 DRY_RUN 演示)
 │   └── test_engine.py      # 断言测试:穿越/去重/冷却/低于方向
@@ -161,9 +163,10 @@ PYTHONPATH=. .venv\Scripts\python tests\test_engine.py
 
 | 命令 / 操作 | 说明 |
 |---|---|
-| `/start` | 开始使用,显示类别菜单 |
+| `/start` | 开始使用,显示类别菜单(🪙 价格 / 🐋 巨鲸 / 📰 RSS) |
 | `/myalerts` | 查看我的全部提醒,可逐条删除 |
-| ➕ 添加提醒 | 选币种 → 选方向(高于/低于)→ 输入阈值数字 → 保存 |
+| ➕ 添加提醒 | 价格:选币种 → 选方向(高于/低于)→ 输入阈值 → 保存 |
+| ➕ 添加 RSS | 选「📰 RSS 订阅」→ 粘贴 RSS/Atom 链接 → 可选关键词(或 `/skip`)→ 保存 |
 | 🗑️ 删除 | 从「我的提醒」列表或推送消息中一键删除 |
 
 示例交互流程:
@@ -240,7 +243,7 @@ curl -x http://127.0.0.1:33210 https://api.telegram.org
 
 - [x] **MVP**:加密货币价格提醒(Gate.io,双向阈值,穿越检测 + 冷却)
 - [x] **巨鲸转账**:接入 WhaleAlert API(同一 `Source` 接口),监控大额链上转账(需 `WHALEALERT_API_KEY`)
-- [ ] **多类别**:新增 RSSHub 适配器 → 新闻 / GitHub 动态 / 学术论文,顶层类别选择
+- [x] **多类别 / RSS 订阅**:通用 RSS/Atom 订阅(任意链接 + 关键词过滤,兼容 RSSHub / GitHub / arXiv),顶层类别选择
 - [ ] **变现**:接入 Telegram Stars 订阅档(免费档限量,付费解锁更多币种/类别),`createInvoiceLink` 收款
 
 ## 常见问题 FAQ

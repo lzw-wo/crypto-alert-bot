@@ -38,6 +38,22 @@ class FakeSource:
             for w in whales
         ]
 
+    def set_rss(self, entries: list[dict]):
+        self.items = [
+            AlertItem(
+                category="rss",
+                key=e["key"],
+                asset=e["url"],
+                value=1.0,
+                extra={
+                    "title": e["title"],
+                    "link": e.get("link", ""),
+                    "summary": e.get("summary", ""),
+                },
+            )
+            for e in entries
+        ]
+
     async def fetch(self):
         return list(self.items)
 
@@ -144,12 +160,49 @@ async def test_whale_cooldown():
     print("✅ 巨鲸 冷却 通过")
 
 
+async def test_rss_keyword_dedup():
+    eng = make_engine(cooldown=0, category="rss")
+    url = "https://example.com/feed"
+    eng.db.add_subscription(1, "rss", url, "contains", 0.0, filter="ai, 比特币")
+    src = eng.sources["rss"]
+
+    # 不含关键词 → 0
+    src.set_rss([{"key": "a", "url": url, "title": "今日天气不错", "summary": ""}])
+    assert await eng.tick() == 0, "不含关键词不应触发"
+
+    # 含关键词 → 1
+    src.set_rss([{"key": "b", "url": url, "title": "AI 大模型新进展", "summary": "比特币生态..."}])
+    assert await eng.tick() == 1, "含关键词应触发"
+
+    # 同一 key 再次出现 → 引擎级去重 → 0
+    src.set_rss([{"key": "b", "url": url, "title": "AI 大模型新进展", "summary": ""}])
+    assert await eng.tick() == 0, "重复条目不应再次触发"
+    eng.db.close()
+
+    print("✅ RSS 关键词过滤 / 去重 通过")
+
+
+async def test_rss_match_all():
+    eng = make_engine(cooldown=0, category="rss")
+    url = "https://example.com/feed2"
+    eng.db.add_subscription(2, "rss", url, "contains", 0.0, filter="")
+    src = eng.sources["rss"]
+
+    src.set_rss([{"key": "x", "url": url, "title": "随便什么内容", "summary": ""}])
+    assert await eng.tick() == 1, "无关键词应匹配全部"
+    eng.db.close()
+
+    print("✅ RSS 全量匹配 通过")
+
+
 async def main():
     await test_crossing_dedup_reset()
     await test_cooldown()
     await test_lt_direction()
     await test_whale_filter_dedup()
     await test_whale_cooldown()
+    await test_rss_keyword_dedup()
+    await test_rss_match_all()
     print("🎉 全部断言通过")
 
 

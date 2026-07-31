@@ -21,6 +21,7 @@ from db import DB
 from engine import Engine
 from notify import init_sender
 from sources.price_gateio import GateIoPriceSource
+from sources.rss_feed import RSSFeedSource
 from sources.whale_alert import WhaleAlertSource
 from telegram.request import HTTPXRequest
 from ui import UI
@@ -31,8 +32,8 @@ logger = logging.getLogger(__name__)
 DRY_RUN_TICKS = 3
 
 
-def build_sources() -> dict:
-    """组装数据源:价格源必开,巨鲸源在有 key 时启用。"""
+def build_sources(db: DB) -> dict:
+    """组装数据源:价格源必开,巨鲸源在有 key 时启用,RSS 源按订阅自适应。"""
     proxy = config.HTTPS_PROXY or None
     sources: dict = {"price": GateIoPriceSource(proxy=proxy)}
     if config.WHALEALERT_API_KEY:
@@ -40,6 +41,12 @@ def build_sources() -> dict:
         logger.info("巨鲸数据源已启用(WhaleAlert)")
     else:
         logger.info("未配置 WHALEALERT_API_KEY,巨鲸类别暂不可用")
+    sources["rss"] = RSSFeedSource(
+        feed_provider=lambda: [
+            s["asset"] for s in db.list_subscriptions() if s["category"] == "rss"
+        ],
+        proxy=proxy,
+    )
     return sources
 
 
@@ -58,7 +65,7 @@ def build_sender(app):
 
 async def run_dry_run():
     db = DB(config.DB_PATH)
-    engine = Engine(db, build_sources(), cooldown=config.COOLDOWN_SECONDS)
+    engine = Engine(db, build_sources(db), cooldown=config.COOLDOWN_SECONDS)
     engine.seed_state()
     subs = db.list_subscriptions()
     logger.info("DRY_RUN 模式:现有订阅 %d 条,跑 %d 轮(间隔 %ss)", len(subs), DRY_RUN_TICKS, config.POLL_INTERVAL)
@@ -83,7 +90,7 @@ async def main():
         raise SystemExit("缺少 BOT_TOKEN:请在 .env 中配置,或从 @BotFather 获取后粘贴")
 
     db = DB(config.DB_PATH)
-    engine = Engine(db, build_sources(), cooldown=config.COOLDOWN_SECONDS)
+    engine = Engine(db, build_sources(db), cooldown=config.COOLDOWN_SECONDS)
     engine.seed_state()
     ui = UI(db)
 

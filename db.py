@@ -14,8 +14,9 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     user_id INTEGER NOT NULL,
     category TEXT NOT NULL DEFAULT 'price',
     asset TEXT NOT NULL,
-    op TEXT NOT NULL CHECK(op IN ('gt','lt')),
+    op TEXT NOT NULL DEFAULT 'gt',
     threshold REAL NOT NULL,
+    filter TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'active',
     created_at INTEGER NOT NULL
 );
@@ -29,6 +30,35 @@ class DB:
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
+        self._migrate()
+
+    def _migrate(self):
+        """旧库迁移:旧表无 filter 列且 op 有 CHECK 限制 → 重建表(保留数据)。"""
+        cols = [r[1] for r in self._conn.execute("PRAGMA table_info(subscriptions)")]
+        if "filter" in cols:
+            return
+        self._conn.executescript(
+            """
+            ALTER TABLE subscriptions RENAME TO subscriptions_old;
+            CREATE TABLE subscriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                category TEXT NOT NULL DEFAULT 'price',
+                asset TEXT NOT NULL,
+                op TEXT NOT NULL DEFAULT 'gt',
+                threshold REAL NOT NULL,
+                filter TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at INTEGER NOT NULL
+            );
+            INSERT INTO subscriptions(id, user_id, category, asset, op, threshold, filter, status, created_at)
+                SELECT id, user_id, category, asset, op, threshold, '', status, created_at
+                FROM subscriptions_old;
+            DROP TABLE subscriptions_old;
+            CREATE INDEX IF NOT EXISTS idx_subs_status ON subscriptions(status);
+            """
+        )
+        self._conn.commit()
 
     def register_user(self, user_id: int, username: str | None) -> None:
         self._conn.execute(
@@ -38,12 +68,20 @@ class DB:
         self._conn.commit()
 
     def add_subscription(
-        self, user_id: int, category: str, asset: str, op: str, threshold: float
+        self,
+        user_id: int,
+        category: str,
+        asset: str,
+        op: str,
+        threshold: float,
+        filter: str = "",
     ) -> int:
+        # 加密货币资产转大写;RSS 的 asset 是 URL,保持原样
+        asset_norm = asset.upper() if category in ("price", "whale") else asset
         cur = self._conn.execute(
-            "INSERT INTO subscriptions(user_id, category, asset, op, threshold, status, created_at) "
-            "VALUES(?, ?, ?, ?, ?, 'active', ?)",
-            (user_id, category, asset.upper(), op, threshold, int(time.time())),
+            "INSERT INTO subscriptions(user_id, category, asset, op, threshold, filter, status, created_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, 'active', ?)",
+            (user_id, category, asset_norm, op, threshold, filter, int(time.time())),
         )
         self._conn.commit()
         return cur.lastrowid

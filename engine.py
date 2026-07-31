@@ -1,7 +1,8 @@
 """告警引擎:多源拉取 → 按类别评估 → 触发通知。
 
 - price:穿越检测(仅"未满足→满足"触发)+ cooldown 冷却,防震荡轰炸
-- whale:按资产/金额过滤,交易 hash 去重(源层),cooldown 节流
+- whale:按资产/金额过滤,key 跨轮去重 + cooldown 节流
+- rss:按 feed URL 匹配,可选关键词过滤,key 跨轮去重 + cooldown 节流
 """
 import logging
 import time
@@ -11,6 +12,10 @@ from notify import send_alert
 from sources.base import AlertItem, Source
 
 logger = logging.getLogger(__name__)
+
+# 去重集合大小上限,超过后裁剪,防长期运行内存膨胀
+SEEN_CAP = 5000
+SEEN_TRIM = 2000
 
 
 def _price_text(sub: dict, item: AlertItem) -> str:
@@ -34,6 +39,17 @@ def _whale_text(sub: dict, item: AlertItem) -> str:
     )
 
 
+def _rss_text(sub: dict, item: AlertItem) -> str:
+    ext = item.extra
+    title = ext.get("title") or "(无标题)"
+    link = ext.get("link") or ""
+    summary = (ext.get("summary") or "").replace("\n", " ")
+    if len(summary) > 120:
+        summary = summary[:117] + "…"
+    kw = f" · 关键词: {sub['filter']}" if sub.get("filter") else ""
+    return f"📰 {title}\n{link}\n{summary}\n(订阅 #{sub['id']}{kw})"
+
+
 class Engine:
     def __init__(self, db: DB, sources: dict[str, Source], cooldown: int = 1800):
         self.db = db
@@ -41,8 +57,8 @@ class Engine:
         self.cooldown = cooldown
         # sub_id -> {"satisfied": bool, "last_fire": float}
         self._state: dict[int, dict] = {}
-        # 引擎级巨鲸去重(源层已去重,此处为双保险)
-        self._seen_whale: set[str] = set()
+        # category -> 已处理 key 集合(跨轮去重)
+        self._seen: dict[str, set[str]] = {}
 
     def seed_state(self):
         for sub in self.db.list_subscriptions():
@@ -56,14 +72,16 @@ class Engine:
                 fired += await self._eval_price(sub, items.get("price", []))
             elif sub["category"] == "whale":
                 fired += await self._eval_whale(sub, items.get("whale", []))
-        # 标记本轮已处理的 whale key(下轮跳过);本轮内所有订阅共享判定
-        for it in items.get("whale", []):
-            self._seen_whale.add(it.key)
-            if len(self._seen_whale) > 5000:
-                self._seen_whale = set(list(self._seen_whale)[-2000:])
+            elif sub["category"] == "rss":
+                fired += await self._eval_rss(sub, items.get("rss", []))
+        # 标记本轮已处理的 key(下轮跳过);本轮内所有订阅共享判定
+        for cat in ("whale", "rss"):
+            for it in items.get(cat, []):
+                self._mark_seen(cat, it.key)
         logger.info("tick: 订阅=%d 触发=%d", len(self.db.list_subscriptions()), fired)
         return fired
 
+    # ---------- 内部 ----------
     async def _fetch_all(self) -> dict[str, list[AlertItem]]:
         result: dict[str, list[AlertItem]] = {}
         for cat, src in self.sources.items():
@@ -73,6 +91,12 @@ class Engine:
                 logger.warning("源 %s 拉取失败: %s", cat, exc)
                 result[cat] = []
         return result
+
+    def _mark_seen(self, cat: str, key: str) -> None:
+        s = self._seen.setdefault(cat, set())
+        s.add(key)
+        if len(s) > SEEN_CAP:
+            self._seen[cat] = set(list(s)[-SEEN_TRIM:])
 
     async def _eval_price(self, sub: dict, items: list[AlertItem]) -> int:
         matches = [it for it in items if it.asset == sub["asset"]]
@@ -95,16 +119,39 @@ class Engine:
         st = self._state.setdefault(sub["id"], {"satisfied": False, "last_fire": 0.0})
         now = time.time()
         fired = 0
+        seen = self._seen.get("whale", set())
         for it in items:
-            if it.key in self._seen_whale:
+            if it.key in seen:
                 continue  # 已在上轮处理过
             if sub["asset"] != "ANY" and it.asset != sub["asset"]:
                 continue
             if it.value < sub["threshold"]:
                 continue
             if (now - st["last_fire"]) < self.cooldown:
-                continue  # 节流:距上次推送不足冷却期
+                continue  # 节流
             st["last_fire"] = now
             await send_alert(sub["user_id"], sub["id"], _whale_text(sub, it))
+            fired += 1
+        return fired
+
+    async def _eval_rss(self, sub: dict, items: list[AlertItem]) -> int:
+        st = self._state.setdefault(sub["id"], {"satisfied": False, "last_fire": 0.0})
+        now = time.time()
+        keywords = [k.strip().lower() for k in (sub.get("filter") or "").split(",") if k.strip()]
+        fired = 0
+        seen = self._seen.get("rss", set())
+        for it in items:
+            if it.asset != sub["asset"]:
+                continue
+            if it.key in seen:
+                continue
+            if keywords:
+                blob = f"{it.extra.get('title', '')} {it.extra.get('summary', '')}".lower()
+                if not any(k in blob for k in keywords):
+                    continue
+            if (now - st["last_fire"]) < self.cooldown:
+                continue  # 节流
+            st["last_fire"] = now
+            await send_alert(sub["user_id"], sub["id"], _rss_text(sub, it))
             fired += 1
         return fired
