@@ -37,11 +37,13 @@ class DB:
         )
         self._conn.commit()
 
-    def add_subscription(self, user_id: int, asset: str, op: str, threshold: float) -> int:
+    def add_subscription(
+        self, user_id: int, category: str, asset: str, op: str, threshold: float
+    ) -> int:
         cur = self._conn.execute(
             "INSERT INTO subscriptions(user_id, category, asset, op, threshold, status, created_at) "
-            "VALUES(?, 'price', ?, ?, ?, 'active', ?)",
-            (user_id, asset.upper(), op, threshold, int(time.time())),
+            "VALUES(?, ?, ?, ?, ?, 'active', ?)",
+            (user_id, category, asset.upper(), op, threshold, int(time.time())),
         )
         self._conn.commit()
         return cur.lastrowid

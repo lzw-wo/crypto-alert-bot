@@ -44,6 +44,7 @@ Crypto Alert Bot 是一个自托管的 Telegram 机器人,用于监控加密货�
 ## 功能特性
 
 - 🪙 **多币种价格提醒**:BTC / ETH / SOL / BNB / DOGE / XRP / ADA / LTC(可在 `ui.py` 中扩展)
+- 🐋 **巨鲸转账监控**:≥ $100 万大额链上转账提醒(WhaleAlert,配置 `WHALEALERT_API_KEY` 后启用),支持全部币种或指定币种
 - 📈📉 **双向阈值**:价格「高于」或「低于」设定值时触发
 - 🚦 **穿越检测 + 冷却**:仅在「未满足 → 满足」的穿越瞬间触发一次,冷却期内不重复轰炸,价格回落撤销条件后重新上膛
 - 📋 **订阅管理**:内联键盘添加 / 查看 / 删除提醒,无感交互
@@ -82,8 +83,9 @@ crypto-alert-bot/
 ├── notify.py               # 通知:DRY_RUN 控制台日志 / Telegram 推送
 ├── ui.py                   # Telegram 交互:命令 + 内联键盘 + 回调
 ├── sources/
-│   ├── base.py             # Source 抽象接口:fetch() -> list[PricePoint]
-│   └── price_gateio.py     # Gate.io 现货行情适配器(无需 key)
+│   ├── base.py             # Source 抽象接口:fetch() -> list[AlertItem]
+│   ├── price_gateio.py     # Gate.io 现货行情适配器(无需 key)
+│   └── whale_alert.py      # WhaleAlert 巨鲸转账适配器(需 key,无 key 时优雅降级)
 ├── tests/
 │   ├── seed_test.py        # 造测试数据(供 DRY_RUN 演示)
 │   └── test_engine.py      # 断言测试:穿越/去重/冷却/低于方向
@@ -199,6 +201,7 @@ Bot:   ✅ 已添加提醒
 |---|---|---|---|
 | `BOT_TOKEN` | ✅ | — | Telegram Bot Token(@BotFather 获取) |
 | `HTTPS_PROXY` | — | 空 | 访问 Telegram 的代理地址;留空则直连 |
+| `WHALEALERT_API_KEY` | — | 空 | WhaleAlert API key([whale-alert.io](https://whale-alert.io) 免费注册),填了才启用巨鲸类别 |
 | `DRY_RUN` | — | `0` | `1` 时离线演练,不连接 Telegram,告警打印控制台 |
 | `POLL_INTERVAL` | — | `60` | 行情轮询间隔(秒) |
 | `COOLDOWN_SECONDS` | — | `1800` | 触发后冷却(秒),防震荡重复轰炸 |
@@ -236,7 +239,7 @@ curl -x http://127.0.0.1:33210 https://api.telegram.org
 ## 路线图
 
 - [x] **MVP**:加密货币价格提醒(Gate.io,双向阈值,穿越检测 + 冷却)
-- [ ] **巨鲸转账**:接入 WhaleAlert API(同一 `Source` 接口),监控大额链上转账
+- [x] **巨鲸转账**:接入 WhaleAlert API(同一 `Source` 接口),监控大额链上转账(需 `WHALEALERT_API_KEY`)
 - [ ] **多类别**:新增 RSSHub 适配器 → 新闻 / GitHub 动态 / 学术论文,顶层类别选择
 - [ ] **变现**:接入 Telegram Stars 订阅档(免费档限量,付费解锁更多币种/类别),`createInvoiceLink` 收款
 

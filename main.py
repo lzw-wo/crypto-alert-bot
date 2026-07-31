@@ -21,6 +21,7 @@ from db import DB
 from engine import Engine
 from notify import init_sender
 from sources.price_gateio import GateIoPriceSource
+from sources.whale_alert import WhaleAlertSource
 from telegram.request import HTTPXRequest
 from ui import UI
 
@@ -28,6 +29,18 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 
 DRY_RUN_TICKS = 3
+
+
+def build_sources() -> dict:
+    """组装数据源:价格源必开,巨鲸源在有 key 时启用。"""
+    proxy = config.HTTPS_PROXY or None
+    sources: dict = {"price": GateIoPriceSource(proxy=proxy)}
+    if config.WHALEALERT_API_KEY:
+        sources["whale"] = WhaleAlertSource(api_key=config.WHALEALERT_API_KEY, proxy=proxy)
+        logger.info("巨鲸数据源已启用(WhaleAlert)")
+    else:
+        logger.info("未配置 WHALEALERT_API_KEY,巨鲸类别暂不可用")
+    return sources
 
 
 def build_sender(app):
@@ -45,8 +58,7 @@ def build_sender(app):
 
 async def run_dry_run():
     db = DB(config.DB_PATH)
-    source = GateIoPriceSource(proxy=config.HTTPS_PROXY or None)
-    engine = Engine(db, source, cooldown=config.COOLDOWN_SECONDS)
+    engine = Engine(db, build_sources(), cooldown=config.COOLDOWN_SECONDS)
     engine.seed_state()
     subs = db.list_subscriptions()
     logger.info("DRY_RUN 模式:现有订阅 %d 条,跑 %d 轮(间隔 %ss)", len(subs), DRY_RUN_TICKS, config.POLL_INTERVAL)
@@ -71,8 +83,7 @@ async def main():
         raise SystemExit("缺少 BOT_TOKEN:请在 .env 中配置,或从 @BotFather 获取后粘贴")
 
     db = DB(config.DB_PATH)
-    source = GateIoPriceSource(proxy=config.HTTPS_PROXY or None)
-    engine = Engine(db, source, cooldown=config.COOLDOWN_SECONDS)
+    engine = Engine(db, build_sources(), cooldown=config.COOLDOWN_SECONDS)
     engine.seed_state()
     ui = UI(db)
 

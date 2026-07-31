@@ -13,6 +13,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 # 可选:走代理时填,例如 http://127.0.0.1:33210
 HTTPS_PROXY = os.getenv("HTTPS_PROXY") or os.getenv("https_proxy") or ""
 
+# 可选:WhaleAlert API key(https://whale-alert.io 免费注册),填了才启用巨鲸类别
+WHALEALERT_API_KEY = os.getenv("WHALEALERT_API_KEY", "")
+
 # 离线演练模式:1 = 不连 Telegram,告警只打印到控制台并写 alerts.log
 DRY_RUN = os.getenv("DRY_RUN", "0") == "1"
 

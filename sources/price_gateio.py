@@ -4,7 +4,7 @@
 """
 import httpx
 
-from .base import PricePoint, Source
+from .base import AlertItem, Source
 
 API_URL = "https://api.gateio.ws/api/v4/spot/tickers"
 
@@ -17,7 +17,7 @@ class GateIoPriceSource(Source):
             proxy=proxy, timeout=timeout, trust_env=False
         )
 
-    async def fetch(self) -> list[PricePoint]:
+    async def fetch(self) -> list[AlertItem]:
         resp = await self._client.get(API_URL)
         resp.raise_for_status()
         by_asset: dict[str, float] = {}
@@ -35,7 +35,10 @@ class GateIoPriceSource(Source):
                 continue
             if price > 0 and base not in by_asset:
                 by_asset[base] = price
-        return [PricePoint(asset=a, price=p, quote="USDT") for a, p in by_asset.items()]
+        return [
+            AlertItem(category="price", key=a, asset=a, value=p, extra={"quote": "USDT"})
+            for a, p in by_asset.items()
+        ]
 
     async def aclose(self):
         await self._client.aclose()
